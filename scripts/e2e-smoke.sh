@@ -41,16 +41,16 @@ done
 # ---------------------------------------------------------------------------
 # Expected values straight from the CSV (%.0f: exact for integers < 2^53).
 # ---------------------------------------------------------------------------
-read -r EXPECTED_ROWS EXPECTED_INCOME EXPECTED_EXPENSE < <(
+read -r EXPECTED_ROWS EXPECTED_INCOME EXPECTED_EXPENSE EXPECTED_BALANCE < <(
     awk -F, 'NR > 1 {
         gsub(/\r/, "")
         if ($0 == "") next
         rows++
         if ($4 == "Receita") income += $3
         else if ($4 == "Despesa") expense += $3
-    } END { printf "%d %.0f %.0f\n", rows, income, expense }' "$CSV_FILE"
+    } END { printf "%d %.0f %.0f %.0f\n", rows, income, expense, income - expense }' "$CSV_FILE"
 )
-log "Expected from CSV: rows=${EXPECTED_ROWS} income=${EXPECTED_INCOME} expense=${EXPECTED_EXPENSE}"
+log "Expected from CSV: rows=${EXPECTED_ROWS} income=${EXPECTED_INCOME} expense=${EXPECTED_EXPENSE} balance=${EXPECTED_BALANCE}"
 
 # Performs a request and fails on an unexpected HTTP status. Prints the body.
 request() {
@@ -81,12 +81,26 @@ assert_equals() {
 log "Checking that the API rejects anonymous requests"
 request 401 "${BASE_URL}/api/dashboard" > /dev/null
 
+# Prints a fresh bearer token for the demo user.
+login() {
+    local token
+    token="$(request 200 -X POST "${BASE_URL}/api/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "$(jq -n --arg email "$EMAIL" --arg password "$PASSWORD" '{email: $email, password: $password}')" |
+        jq -r '.token')"
+    [ -n "$token" ] && [ "$token" != "null" ] || fail "login did not return a token"
+    printf '%s' "$token"
+}
+
+# Revokes the token and proves it can no longer be used.
+logout() {
+    local token=$1
+    request 204 -H "Authorization: Bearer ${token}" -X POST "${BASE_URL}/api/auth/logout" > /dev/null
+    request 401 -H "Authorization: Bearer ${token}" "${BASE_URL}/api/auth/me" > /dev/null
+}
+
 log "Logging in as ${EMAIL}"
-TOKEN="$(request 200 -X POST "${BASE_URL}/api/auth/login" \
-    -H 'Content-Type: application/json' \
-    -d "$(jq -n --arg email "$EMAIL" --arg password "$PASSWORD" '{email: $email, password: $password}')" |
-    jq -r '.token')"
-[ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || fail "login did not return a token"
+TOKEN="$(login)"
 AUTH=(-H "Authorization: Bearer ${TOKEN}")
 
 # Baseline (this request also warms the dashboard cache, so the final check
@@ -94,6 +108,7 @@ AUTH=(-H "Authorization: Bearer ${TOKEN}")
 BASELINE="$(request 200 "${AUTH[@]}" "${BASE_URL}/api/dashboard")"
 BASE_INCOME="$(jq -r '.data.income' <<< "$BASELINE")"
 BASE_EXPENSE="$(jq -r '.data.expense' <<< "$BASELINE")"
+BASE_BALANCE="$(jq -r '.data.balance' <<< "$BASELINE")"
 BASE_TOTAL="$(request 200 "${AUTH[@]}" "${BASE_URL}/api/transactions?per_page=1" | jq -r '.meta.total')"
 
 log "Uploading ${CSV_FILE}"
@@ -124,18 +139,25 @@ DASHBOARD="$(request 200 "${AUTH[@]}" "${BASE_URL}/api/dashboard")"
 # jq arithmetic is exact for integers < 2^53; totals are compared as integers.
 INCOME_DELTA="$(jq -r --argjson base "$BASE_INCOME" '.data.income - $base' <<< "$DASHBOARD")"
 EXPENSE_DELTA="$(jq -r --argjson base "$BASE_EXPENSE" '.data.expense - $base' <<< "$DASHBOARD")"
-BALANCE="$(jq -r '.data.balance' <<< "$DASHBOARD")"
-EXPECTED_BALANCE="$(jq -rn --argjson i "$(jq -r '.data.income' <<< "$DASHBOARD")" --argjson e "$(jq -r '.data.expense' <<< "$DASHBOARD")" '$i - $e')"
+BALANCE_DELTA="$(jq -r --argjson base "$BASE_BALANCE" '.data.balance - $base' <<< "$DASHBOARD")"
 
 assert_equals "dashboard.income (delta)" "$EXPECTED_INCOME" "$INCOME_DELTA"
 assert_equals "dashboard.expense (delta)" "$EXPECTED_EXPENSE" "$EXPENSE_DELTA"
-assert_equals "dashboard.balance" "$EXPECTED_BALANCE" "$BALANCE"
+assert_equals "dashboard.balance (delta)" "$EXPECTED_BALANCE" "$BALANCE_DELTA"
 
 TOTAL="$(request 200 "${AUTH[@]}" "${BASE_URL}/api/transactions?per_page=1" | jq -r '.meta.total')"
 assert_equals "transactions.meta.total (delta)" "$EXPECTED_ROWS" "$((TOTAL - BASE_TOTAL))"
 
 log "Logging out"
-request 204 "${AUTH[@]}" -X POST "${BASE_URL}/api/auth/logout" > /dev/null
-request 401 "${AUTH[@]}" "${BASE_URL}/api/auth/me" > /dev/null
+logout "$TOKEN"
+
+log "Logging in and out a second time"
+SECOND_TOKEN="$(login)"
+[ "$SECOND_TOKEN" != "$TOKEN" ] || fail "second login returned the revoked token"
+request 200 -H "Authorization: Bearer ${SECOND_TOKEN}" "${BASE_URL}/api/auth/me" > /dev/null
+logout "$SECOND_TOKEN"
+
+log "Checking that the API rejects anonymous requests after logout"
+request 401 "${BASE_URL}/api/transactions" > /dev/null
 
 log "All end-to-end checks passed"

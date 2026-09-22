@@ -1,7 +1,8 @@
 name: financial-import
 
 # Every value has a safe local default; override any of them in a root .env
-# file (see .env.example). Only the web service publishes a port.
+# file (see .env.example). Only the web service publishes a port, and only on
+# the loopback interface.
 
 x-app-environment: &app-environment
   APP_NAME: "Financial Import"
@@ -30,10 +31,6 @@ x-app-environment: &app-environment
   DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-demo@example.com}
   DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-password}
 
-x-app-build: &app-build
-  context: .
-  dockerfile: docker/php/Dockerfile
-
 services:
   web:
     build:
@@ -41,14 +38,16 @@ services:
       dockerfile: docker/nginx/Dockerfile
     image: financial-import/web:local
     ports:
-      - "${WEB_PORT:-8080}:8080"
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
     depends_on:
       app:
         condition: service_healthy
     restart: unless-stopped
 
   app:
-    build: *app-build
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
     image: financial-import/app:local
     environment:
       <<: *app-environment
@@ -64,8 +63,9 @@ services:
     restart: unless-stopped
 
   worker:
-    build: *app-build
+    # Same image as app (built once by the app service), different command.
     image: financial-import/app:local
+    pull_policy: never
     command: >-
       php artisan queue:work redis
       --queue=default
@@ -91,8 +91,10 @@ services:
       timeout: 5s
       start_period: 30s
       retries: 3
-    # Lets an in-flight chunk finish before the container is stopped.
-    stop_grace_period: 60s
+    # On SIGTERM queue:work finishes the job in progress, then exits. A large
+    # import may outlast this window: the worker is then killed, the job is
+    # released after retry_after and resumes from its last committed chunk.
+    stop_grace_period: 120s
     restart: unless-stopped
 
   mysql:
