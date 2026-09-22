@@ -96,6 +96,19 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
+  docker-test-commands:
+    name: README test commands (Docker only)
+    runs-on: ubuntu-latest
+    # Proves the documented "no PHP/Node on the host" test commands keep working.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Backend tests in the composer:2 image
+        run: docker run --rm -v "$(pwd)/backend:/app" -w /app composer:2 sh -c "composer install --no-interaction --no-progress && vendor/bin/pest"
+
+      - name: Frontend tests and build in the node:22-alpine image
+        run: docker run --rm -v "$(pwd)/frontend:/app" -w /app node:22-alpine sh -c "npm ci && npm test && npm run build"
+
   e2e:
     name: End-to-end (docker compose)
     runs-on: ubuntu-latest
