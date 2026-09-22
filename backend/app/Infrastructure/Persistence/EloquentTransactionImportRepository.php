@@ -76,8 +76,10 @@ final readonly class EloquentTransactionImportRepository implements TransactionI
         $import->forceFill([
             'status' => ImportStatus::Failed,
             'processed_rows' => 0,
+            'failed_rows' => 0,
             'last_processed_line' => 0,
-            'errors' => $this->appendErrors([$reason->toArray()], $import->errors ?? []),
+            // Row errors described rows that were never kept: only the reason remains.
+            'errors' => [$reason->toArray()],
             'finished_at' => Carbon::now(),
         ])->save();
     }

@@ -33,7 +33,7 @@ it('marks the import as failed once all attempts are exhausted', function (): vo
         ->and($import->errors)->toBe([['line' => 0, 'message' => ROLLED_BACK_MESSAGE]]);
 });
 
-it('rolls back rows committed by earlier attempts', function (): void {
+it('rolls back rows committed by earlier attempts and resets the progress', function (): void {
     Event::fake([TransactionsRolledBack::class]);
     $user = User::factory()->create();
     Transaction::factory()->for($user)->create(['description' => 'Kept']);
@@ -43,6 +43,8 @@ it('rolls back rows committed by earlier attempts', function (): void {
         'status' => ImportStatus::Processing,
         'total_rows' => 3,
         'processed_rows' => 1,
+        'failed_rows' => 1,
+        'errors' => [['line' => 3, 'message' => 'Amount must be a positive integer number of cents.']],
         'last_processed_line' => 3,
     ]);
     Transaction::factory()->for($user)->create(['transaction_import_id' => $import->id]);
@@ -51,8 +53,10 @@ it('rolls back rows committed by earlier attempts', function (): void {
 
     $import->refresh();
 
+    // Nothing of this import was saved, so no row is reported as rejected either.
     expect($import->status)->toBe(ImportStatus::Failed)
         ->and($import->processed_rows)->toBe(0)
+        ->and($import->failed_rows)->toBe(0)
         ->and($import->last_processed_line)->toBe(0)
         ->and($import->errors)->toBe([['line' => 0, 'message' => ROLLED_BACK_MESSAGE]])
         ->and(Transaction::query()->pluck('description')->all())->toBe(['Kept']);
