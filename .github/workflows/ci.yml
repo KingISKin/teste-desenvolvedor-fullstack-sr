@@ -64,7 +64,9 @@ jobs:
           restore-keys: composer-${{ runner.os }}-
 
       - name: Install dependencies
-        run: composer install --no-interaction --no-progress --prefer-dist
+        run: |
+          cp .env.example .env
+          composer install --no-interaction --no-progress --prefer-dist
 
       - name: Code style (Pint)
         run: vendor/bin/pint --test
