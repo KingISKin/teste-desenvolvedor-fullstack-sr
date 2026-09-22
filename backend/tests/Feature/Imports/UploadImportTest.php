@@ -55,9 +55,7 @@ it('stores the file privately, records a pending import and queues the job', fun
 
 it('accepts a .csv file whose content is sniffed as plain text', function (): void {
     actingAsUser();
-    $file = realUpload('export.csv', 'date,description,amount,type
-2026-05-01,X,1,Receita
-');
+    $file = realUpload('export.csv', csv(['2026-05-01,X,1,Receita']));
 
     $this->postJson('/api/imports', ['file' => $file])->assertAccepted();
 

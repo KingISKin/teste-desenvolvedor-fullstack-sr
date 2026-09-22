@@ -13,7 +13,6 @@ use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         api: __DIR__.'/../routes/api.php',
-        health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
         // Stateless token API: no cookies, sessions or CSRF are involved.

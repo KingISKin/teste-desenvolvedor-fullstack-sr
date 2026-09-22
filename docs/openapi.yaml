@@ -33,7 +33,6 @@ tags:
   - name: Dashboard
   - name: Transactions
   - name: Imports
-  - name: Health
 
 security:
   - bearerAuth: []
@@ -327,23 +326,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '429':
           $ref: '#/components/responses/TooManyRequests'
-
-  /up:
-    get:
-      tags: [Health]
-      summary: Application health check
-      description: Boots the application and answers 200 with a small HTML page.
-      operationId: health
-      security: []
-      responses:
-        '200':
-          description: Application is up.
-          content:
-            text/html:
-              schema:
-                type: string
-        '500':
-          description: Application failed to boot.
 
 components:
   securitySchemes:
