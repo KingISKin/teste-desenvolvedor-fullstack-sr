@@ -13,6 +13,7 @@ use App\Domain\Imports\Contracts\ImportProcessingQueue;
 use App\Domain\Imports\Contracts\TransactionImportRepository;
 use App\Domain\Transactions\Contracts\TransactionRepository;
 use App\Domain\Transactions\Events\TransactionsImported;
+use App\Domain\Transactions\Events\TransactionsRolledBack;
 use App\Infrastructure\Cache\LaravelDashboardSummaryCache;
 use App\Infrastructure\Csv\StreamingCsvReader;
 use App\Infrastructure\Persistence\EloquentTransactionImportRepository;
@@ -43,6 +44,9 @@ final class DomainServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        Event::listen(TransactionsImported::class, InvalidateDashboardCache::class);
+        Event::listen(
+            [TransactionsImported::class, TransactionsRolledBack::class],
+            InvalidateDashboardCache::class,
+        );
     }
 }

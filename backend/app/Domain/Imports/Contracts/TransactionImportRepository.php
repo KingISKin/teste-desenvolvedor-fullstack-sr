@@ -32,4 +32,10 @@ interface TransactionImportRepository
     public function markCompleted(TransactionImport $import): void;
 
     public function markFailed(TransactionImport $import, RowError $reason): void;
+
+    /**
+     * Marks the import failed after its persisted rows were removed: the
+     * progress counters and checkpoint are reset accordingly.
+     */
+    public function markRolledBack(TransactionImport $import, RowError $reason): void;
 }

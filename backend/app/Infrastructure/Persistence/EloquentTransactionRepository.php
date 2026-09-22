@@ -39,6 +39,11 @@ final class EloquentTransactionRepository implements TransactionRepository
         Transaction::query()->insert($rows);
     }
 
+    public function deleteForImport(int $importId): int
+    {
+        return Transaction::query()->where('transaction_import_id', $importId)->delete();
+    }
+
     public function paginateForUser(int $userId, int $perPage): LengthAwarePaginator
     {
         // Matches the (user_id, transaction_date, id) index: no filesort needed.

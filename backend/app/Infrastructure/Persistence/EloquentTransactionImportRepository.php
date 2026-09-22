@@ -71,6 +71,17 @@ final readonly class EloquentTransactionImportRepository implements TransactionI
         ])->save();
     }
 
+    public function markRolledBack(TransactionImport $import, RowError $reason): void
+    {
+        $import->forceFill([
+            'status' => ImportStatus::Failed,
+            'processed_rows' => 0,
+            'last_processed_line' => 0,
+            'errors' => $this->appendErrors([$reason->toArray()], $import->errors ?? []),
+            'finished_at' => Carbon::now(),
+        ])->save();
+    }
+
     /**
      * Stored errors are capped so a badly broken file cannot bloat the row.
      *
