@@ -75,7 +75,7 @@ it('rejects invalid uploads without queueing anything', function (Closure $paylo
     'not a file' => [fn (): array => ['file' => 'date,description'], 'The file field must be a file.'],
     'empty file' => [fn (): array => ['file' => UploadedFile::fake()->createWithContent('empty.csv', '')], 'The file is empty.'],
     'txt extension' => [fn (): array => ['file' => UploadedFile::fake()->createWithContent('export.txt', csv(['2026-05-01,X,1,Receita']))], 'The file must be a .csv file.'],
-    'image' => [fn (): array => ['file' => UploadedFile::fake()->image('photo.png')], 'The file must be a .csv file.'],
+    'image' => [fn (): array => ['file' => UploadedFile::fake()->createWithContent('photo.png', "\x89PNG\r\n\x1a\n")], 'The file must be a .csv file.'],
     // A real file (fakes report a MIME type derived from the name, not sniffed).
     'binary content named .csv' => [fn (): array => ['file' => realUpload('data.csv', "\x89PNG\r\n\x1a\n".str_repeat("\0", 64))], 'The file content must be plain-text CSV.'],
     'too large' => [fn (): array => ['file' => UploadedFile::fake()->create('big.csv', 20481, 'text/csv')], 'The file field must not be greater than 20480 kilobytes.'],

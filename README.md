@@ -1,6 +1,6 @@
 # Financial Import & Management System
 
-[![CI](https://github.com/KingISkin/teste-desenvolvedor-fullstack-sr/actions/workflows/ci.yml/badge.svg)](https://github.com/KingISkin/teste-desenvolvedor-fullstack-sr/actions/workflows/ci.yml)
+[![CI](https://github.com/KingISKin/teste-desenvolvedor-fullstack-sr/actions/workflows/ci.yml/badge.svg)](https://github.com/KingISKin/teste-desenvolvedor-fullstack-sr/actions/workflows/ci.yml)
 
 This is my solution to the **Senior Full Stack Developer practical test**: a system for importing and managing financial transactions.
 
@@ -38,7 +38,7 @@ This is my solution to the **Senior Full Stack Developer practical test**: a sys
 **Requirements:** Docker with Compose v2. Nothing else is needed on the host.
 
 ```bash
-git clone https://github.com/KingISkin/teste-desenvolvedor-fullstack-sr.git
+git clone https://github.com/KingISKin/teste-desenvolvedor-fullstack-sr.git
 cd teste-desenvolvedor-fullstack-sr
 docker compose up -d --build --wait
 ```
@@ -76,13 +76,14 @@ docker compose down            # stop (add -v to also remove the data volumes)
 Using Docker (no PHP needed on the host). The official Composer image already includes PHP with `pdo_sqlite`. The whole repository is mounted because one feature test imports `samples/financial_transactions.csv` from the repository root:
 
 ```bash
-docker run --rm -v "$(pwd):/app" -w /app/backend composer:2 sh -c "composer install --no-interaction --no-progress && vendor/bin/pest"
+docker run --rm -v "$(pwd):/app" -w /app/backend composer:2 sh -c "cp -n .env.example .env; composer install --no-interaction --no-progress && vendor/bin/pest"
 ```
 
 Locally (PHP ≥ 8.2 with `pdo_sqlite`, run from a full checkout so `samples/` is present):
 
 ```bash
 cd backend
+cp -n .env.example .env
 composer install
 vendor/bin/pest            # or: php artisan test
 vendor/bin/pint --test     # code style
