@@ -33,8 +33,10 @@ final class AppServiceProvider extends ServiceProvider
             Str::lower((string) $request->input('email')).'|'.$request->ip(),
         ));
 
+        // Runs before auth:sanctum, so the token is resolved explicitly (the guard
+        // caches the user, the auth middleware does not query it again).
         RateLimiter::for('api', static fn (Request $request): Limit => Limit::perMinute(120)->by(
-            $request->user()?->getAuthIdentifier() ?? $request->ip(),
+            $request->user('sanctum')?->getAuthIdentifier() ?? $request->ip(),
         ));
     }
 }
