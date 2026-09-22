@@ -1,0 +1,29 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Backend
+backend/vendor/
+backend/.env
+backend/.phpunit.result.cache
+backend/.phpunit.cache/
+backend/coverage/
+backend/storage/*.key
+backend/database/*.sqlite
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Misc
+coverage/
+*.log
