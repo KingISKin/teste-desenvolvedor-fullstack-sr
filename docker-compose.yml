@@ -1,0 +1,132 @@
+name: financial-import
+
+# Every value has a safe local default; override any of them in a root .env
+# file (see .env.example). Only the web service publishes a port.
+
+x-app-environment: &app-environment
+  APP_NAME: "Financial Import"
+  APP_ENV: production
+  APP_DEBUG: "false"
+  # Empty = generated on first boot and kept on the shared storage volume.
+  APP_KEY: ${APP_KEY:-}
+  APP_URL: http://localhost:${WEB_PORT:-8080}
+  LOG_CHANNEL: stderr
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DB_CONNECTION: mysql
+  DB_HOST: mysql
+  DB_PORT: "3306"
+  DB_DATABASE: ${DB_DATABASE:-finance}
+  DB_USERNAME: ${DB_USERNAME:-finance}
+  DB_PASSWORD: ${DB_PASSWORD:-finance-secret}
+  CACHE_STORE: redis
+  QUEUE_CONNECTION: redis
+  SESSION_DRIVER: array
+  REDIS_CLIENT: phpredis
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_PASSWORD: ${REDIS_PASSWORD:-redis-secret}
+  SANCTUM_TOKEN_EXPIRATION: ${SANCTUM_TOKEN_EXPIRATION:-480}
+  DEMO_USER_NAME: ${DEMO_USER_NAME:-Demo User}
+  DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-demo@example.com}
+  DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-password}
+
+x-app-build: &app-build
+  context: .
+  dockerfile: docker/php/Dockerfile
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+    image: financial-import/web:local
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+  app:
+    build: *app-build
+    image: financial-import/app:local
+    environment:
+      <<: *app-environment
+      CONTAINER_ROLE: app
+    volumes:
+      # Uploaded CSVs are written here by app and read by worker.
+      - storage:/var/www/html/storage/app
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: *app-build
+    image: financial-import/app:local
+    command: >-
+      php artisan queue:work redis
+      --queue=default
+      --sleep=1
+      --tries=3
+      --timeout=600
+      --max-jobs=500
+      --max-time=3600
+    environment:
+      <<: *app-environment
+      CONTAINER_ROLE: worker
+    volumes:
+      - storage:/var/www/html/storage/app
+    depends_on:
+      # Waits for migrations, which only the app container runs.
+      app:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f '[a]rtisan queue:work' > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    # Lets an in-flight chunk finish before the container is stopped.
+    stop_grace_period: 60s
+    restart: unless-stopped
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${DB_DATABASE:-finance}
+      MYSQL_USER: ${DB_USERNAME:-finance}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-finance-secret}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root-secret}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      start_period: 30s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-redis-secret}", "--appendonly", "yes"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:-redis-secret}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  mysql-data:
+  redis-data:
+  storage:

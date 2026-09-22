@@ -1,0 +1,33 @@
+# Build context is the repository root (images need docker/ plus backend/ or frontend/).
+.git
+.github
+.idea
+.vscode
+**/.DS_Store
+**/*.log
+.env
+docs
+scripts
+samples
+README.md
+
+# Backend: dependencies are installed inside the image; no local state.
+backend/vendor
+backend/.env
+backend/.phpunit.cache
+backend/.phpunit.result.cache
+backend/coverage
+backend/tests
+backend/bootstrap/cache/*.php
+backend/storage/logs/*
+backend/storage/framework/cache/data/*
+backend/storage/framework/sessions/*
+backend/storage/framework/views/*
+backend/storage/framework/testing/*
+backend/storage/app/private/*
+backend/database/*.sqlite
+
+# Frontend: dependencies and build output are produced inside the image.
+frontend/node_modules
+frontend/dist
+frontend/coverage
