@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Imports\Contracts\CsvReader;
+use App\Domain\Imports\Contracts\TransactionImportRepository;
 use App\Domain\Transactions\Contracts\TransactionRepository;
+use App\Infrastructure\Csv\StreamingCsvReader;
+use App\Infrastructure\Persistence\EloquentTransactionImportRepository;
 use App\Infrastructure\Persistence\EloquentTransactionRepository;
 use Illuminate\Support\ServiceProvider;
 
@@ -18,5 +22,7 @@ final class DomainServiceProvider extends ServiceProvider
      */
     public array $singletons = [
         TransactionRepository::class => EloquentTransactionRepository::class,
+        TransactionImportRepository::class => EloquentTransactionImportRepository::class,
+        CsvReader::class => StreamingCsvReader::class,
     ];
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\TransactionController;
+use App\Http\Controllers\Api\TransactionImportController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -20,4 +21,10 @@ Route::middleware('auth:sanctum')->group(function (): void {
     Route::get('auth/me', [AuthController::class, 'me'])->name('auth.me');
 
     Route::get('transactions', [TransactionController::class, 'index'])->name('transactions.index');
+
+    Route::post('imports', [TransactionImportController::class, 'store'])->name('imports.store');
+    Route::get('imports/{import}', [TransactionImportController::class, 'show'])
+        ->whereNumber('import')
+        ->middleware('can:view,import')
+        ->name('imports.show');
 });
