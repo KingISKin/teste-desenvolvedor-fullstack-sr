@@ -22,8 +22,12 @@ info:
     **Errors.** Every error body is JSON with at least a `message` field.
     Validation errors (422) add an `errors` object keyed by field.
 
-    **Rate limits.** Login: 5 attempts per minute per e-mail + IP. All API
-    routes: 120 requests per minute per user (or IP when anonymous).
+    **Rate limits.** Login: 5 attempts per minute per e-mail + IP. Uploads:
+    10 per minute per user. All API routes: 120 requests per minute per user
+    (or IP when anonymous).
+
+    **CORS.** The SPA is served from the same origin; no cross-origin access
+    is granted unless `CORS_ALLOWED_ORIGINS` is configured.
 servers:
   - url: http://localhost:8080
     description: Docker compose stack (nginx proxies /api to php-fpm)
@@ -180,8 +184,8 @@ paths:
       tags: [Imports]
       summary: Upload a CSV file for background import
       description: |
-        The file is validated (CSV/plain text by content, at most 20 MB), stored
-        privately and queued. Processing (header check, row validation and
+        The file is validated (non-empty, `.csv` extension, plain-text content
+        detected by content sniffing, at most 20 MB), stored privately and queued. Processing (header check, row validation and
         chunked persistence) happens in a queue worker.
 
         Expected CSV layout (header required, exactly these columns):
@@ -197,8 +201,13 @@ paths:
         * `amount`: positive integer in cents
         * `type`: `Receita` (income) or `Despesa` (expense), case-insensitive
 
-        Invalid rows are skipped and reported in the import `errors`; an invalid
-        header fails the whole import.
+        Invalid rows are skipped and reported in the import `errors` with their
+        physical line number; an invalid header fails the whole import. Quoted
+        fields spanning several lines are not supported.
+
+        Imports are all-or-nothing on infrastructure failures: if processing
+        still fails after every retry, rows saved by earlier attempts are
+        removed and the import is marked `failed`.
       operationId: createImport
       requestBody:
         required: true
@@ -211,7 +220,7 @@ paths:
                 file:
                   type: string
                   format: binary
-                  description: CSV file (csv or txt), max 20480 KB.
+                  description: CSV file (.csv), max 20480 KB.
       responses:
         '202':
           description: File accepted and queued for processing.
@@ -244,15 +253,19 @@ paths:
         '413':
           description: Request body larger than the web server limit (21 MB).
         '422':
-          description: Missing file, wrong file type or file too large.
+          description: |
+            Missing or empty file, extension other than `.csv`, non-text content
+            or file too large. Messages: `The file is empty.`, `The file must be
+            a .csv file.`, `The file content must be plain-text CSV.`, `The file
+            field must not be greater than 20480 kilobytes.`
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ValidationError'
               example:
-                message: 'The file field must be a file of type: csv, txt.'
+                message: The file must be a .csv file.
                 errors:
-                  file: ['The file field must be a file of type: csv, txt.']
+                  file: [The file must be a .csv file.]
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -571,7 +584,9 @@ components:
         line:
           type: integer
           minimum: 0
-          description: CSV line number (1 = header). 0 means a file-level problem.
+          description: |
+            Physical CSV line number (1 = header). 0 means a file-level problem
+            (file missing, import could not be queued or was rolled back).
         message:
           type: string
 
