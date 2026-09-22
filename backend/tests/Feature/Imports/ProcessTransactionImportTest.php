@@ -16,20 +16,21 @@ use App\Models\Transaction;
 use App\Models\TransactionImport;
 use App\Models\User;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 beforeEach(function (): void {
-    Storage::fake('local');
+    $this->disk = $this->fakeImportsDisk();
 });
 
 function storedImport(string $content, ?User $user = null): TransactionImport
 {
     $import = TransactionImport::factory()
         ->for($user ?? User::factory()->create())
-        ->create(['stored_path' => 'imports/test.csv']);
+        ->create(['stored_path' => 'imports/'.Str::uuid()->toString().'.csv']);
 
-    Storage::disk('local')->put($import->stored_path, $content);
+    test()->disk->put($import->stored_path, $content);
 
     return $import;
 }
@@ -71,7 +72,7 @@ it('imports valid rows, records invalid ones and completes', function (): void {
         ->and($transactions[2]->description)->toBe('Serviços, Prestados');
 
     // Processed uploads are removed from storage.
-    Storage::disk('local')->assertMissing($import->stored_path);
+    $this->disk->assertMissing($import->stored_path);
 });
 
 it('fails the import without retrying when the header is invalid', function (): void {
@@ -89,7 +90,7 @@ it('fails the import without retrying when the header is invalid', function (): 
         ->and(Transaction::query()->count())->toBe(0);
 
     // The file is kept for troubleshooting.
-    Storage::disk('local')->assertExists($import->stored_path);
+    $this->disk->assertExists($import->stored_path);
 });
 
 it('fails an empty file', function (): void {
@@ -113,7 +114,7 @@ it('completes a header-only file with zero rows', function (): void {
 });
 
 it('fails when the stored file is missing', function (): void {
-    $import = TransactionImport::factory()->create(['stored_path' => 'imports/missing.csv']);
+    $import = TransactionImport::factory()->create(['stored_path' => 'imports/'.Str::uuid()->toString().'.csv']);
 
     ProcessTransactionImport::dispatchSync($import->id);
 
@@ -331,4 +332,26 @@ it('declares a bounded retry policy', function (): void {
         ->and($job->failOnTimeout)->toBeTrue()
         ->and($job->middleware()[0])->toBeInstanceOf(WithoutOverlapping::class)
         ->and($job->middleware()[0]->expiresAfter)->toBeLessThan(config('queue.connections.redis.retry_after'));
+});
+
+it('drops a duplicate delivery while another worker holds the import lock', function (): void {
+    $import = storedImport(csv(['2026-01-01,A,100,Receita']));
+    $job = new ProcessTransactionImport($import->id);
+    $lock = Cache::lock($job->middleware()[0]->getLockKey($job), 600);
+
+    expect($lock->get())->toBeTrue();
+
+    try {
+        dispatch_sync($job);
+    } finally {
+        $lock->release();
+    }
+
+    expect(Transaction::query()->count())->toBe(0)
+        ->and($import->refresh()->status)->toBe(ImportStatus::Pending);
+
+    // Once the lock is free, the import runs normally.
+    ProcessTransactionImport::dispatchSync($import->id);
+
+    expect(Transaction::query()->count())->toBe(1);
 });

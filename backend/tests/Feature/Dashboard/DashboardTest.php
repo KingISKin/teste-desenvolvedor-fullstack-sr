@@ -12,7 +12,6 @@ use App\Models\TransactionImport;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 
 it('sums income and expense separately and derives the balance', function (): void {
     $user = actingAsUser();
@@ -80,7 +79,7 @@ it('computes the summary with a single aggregate query and caches it per user', 
 });
 
 it('serves the cached value until new transactions are imported', function (): void {
-    Storage::fake('local');
+    $disk = $this->fakeImportsDisk();
     $user = actingAsUser();
     Transaction::factory()->for($user)->income(1_000)->create();
 
@@ -91,8 +90,8 @@ it('serves the cached value until new transactions are imported', function (): v
     $this->getJson('/api/dashboard')->assertJsonPath('data.income', 1_000);
 
     // ...while processing an import invalidates it automatically.
-    $import = TransactionImport::factory()->for($user)->create(['stored_path' => 'imports/new.csv']);
-    Storage::disk('local')->put($import->stored_path, csv(['2026-01-01,Salary,5000,Receita']));
+    $import = TransactionImport::factory()->for($user)->create();
+    $disk->put($import->stored_path, csv(['2026-01-01,Salary,5000,Receita']));
 
     ProcessTransactionImport::dispatchSync($import->id);
 

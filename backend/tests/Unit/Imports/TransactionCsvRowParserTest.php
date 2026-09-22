@@ -66,9 +66,7 @@ it('reports every violation of a row at once', function (): void {
 });
 
 it('accepts the exact header, case-insensitively and with a UTF-8 BOM', function (array $header): void {
-    $this->parser->assertValidHeader($header);
-
-    expect(true)->toBeTrue();
+    expect(fn () => $this->parser->assertValidHeader($header))->not->toThrow(InvalidCsvHeader::class);
 })->with([
     'exact' => [['date', 'description', 'amount', 'type']],
     'upper case and spaces' => [[' Date', 'DESCRIPTION ', 'Amount', 'Type']],

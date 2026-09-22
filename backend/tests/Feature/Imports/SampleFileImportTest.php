@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use App\Models\Transaction;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Storage;
 
 /*
  * End-to-end through the HTTP layer with the real 15,000-row sample file.
@@ -13,7 +12,7 @@ use Illuminate\Support\Facades\Storage;
  *   awk -F, 'NR>1 { if ($4=="Receita") i+=$3; else e+=$3 } END { print i, e, i-e }'
  */
 it('imports the real sample file and reports exact dashboard totals', function (): void {
-    Storage::fake('local');
+    $this->fakeImportsDisk();
     $user = actingAsUser();
 
     $upload = new UploadedFile(sampleCsvPath(), 'financial_transactions.csv', null, null, true);

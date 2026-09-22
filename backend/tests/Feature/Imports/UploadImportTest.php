@@ -8,11 +8,10 @@ use App\Jobs\ProcessTransactionImport;
 use App\Models\TransactionImport;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Storage;
 
 beforeEach(function (): void {
     Queue::fake();
-    Storage::fake('local');
+    $this->disk = $this->fakeImportsDisk();
 });
 
 it('stores the file privately, records a pending import and queues the job', function (): void {
@@ -44,7 +43,7 @@ it('stores the file privately, records a pending import and queues the job', fun
         ->and($import->stored_path)->toStartWith("imports/{$user->id}/")
         ->and($import->stored_path)->not->toContain('my transactions');
 
-    Storage::disk('local')->assertExists($import->stored_path);
+    $this->disk->assertExists($import->stored_path);
 
     Queue::assertPushed(
         ProcessTransactionImport::class,
@@ -111,7 +110,7 @@ it('marks the import as failed and removes the file when it cannot be queued', f
         ->and($import->errors)->toBe([['line' => 0, 'message' => 'The import could not be queued. Please try again.']])
         ->and($import->finished_at)->not->toBeNull();
 
-    Storage::disk('local')->assertMissing($import->stored_path);
+    $this->disk->assertMissing($import->stored_path);
 });
 
 it('limits each user to 10 uploads per minute', function (): void {
