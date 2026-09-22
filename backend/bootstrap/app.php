@@ -8,6 +8,7 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -34,4 +35,12 @@ return Application::configure(basePath: dirname(__DIR__))
                 'email' => [__('auth.failed')],
             ]),
         );
+
+        // One generic body for unknown routes, missing models and resources owned by
+        // other users, so responses never reveal model names or whether an id exists.
+        $exceptions->render(static function (HttpExceptionInterface $exception, Request $request) {
+            return $exception->getStatusCode() === 404 && $request->is('api/*')
+                ? response()->json(['message' => 'Not found.'], 404)
+                : null;
+        });
     })->create();

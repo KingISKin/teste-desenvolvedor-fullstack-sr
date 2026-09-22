@@ -33,12 +33,15 @@ it('hides imports of other users behind a 404', function (): void {
     actingAsUser();
     $foreignImport = TransactionImport::factory()->create();
 
-    $this->getJson("/api/imports/{$foreignImport->id}")->assertNotFound();
+    $this->getJson("/api/imports/{$foreignImport->id}")
+        ->assertNotFound()
+        ->assertExactJson(['message' => 'Not found.']);
 });
 
 it('returns 404 for unknown imports', function (): void {
     actingAsUser();
 
-    $this->getJson('/api/imports/999999')->assertNotFound();
-    $this->getJson('/api/imports/abc')->assertNotFound();
+    // Same body as a foreign import: existence of an id is never revealed.
+    $this->getJson('/api/imports/999999')->assertNotFound()->assertExactJson(['message' => 'Not found.']);
+    $this->getJson('/api/imports/abc')->assertNotFound()->assertExactJson(['message' => 'Not found.']);
 });
