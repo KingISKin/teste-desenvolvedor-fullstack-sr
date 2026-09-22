@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Domain\Dashboard\Contracts\DashboardSummaryCache;
+use App\Domain\Dashboard\DTOs\DashboardSummary;
 use App\Domain\Transactions\Events\TransactionsImported;
 use App\Infrastructure\Cache\LaravelDashboardSummaryCache;
 use App\Jobs\ProcessTransactionImport;
 use App\Models\Transaction;
 use App\Models\TransactionImport;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -65,18 +68,15 @@ it('computes the summary with a single aggregate query and caches it per user', 
 
     DB::enableQueryLog();
     $this->getJson('/api/dashboard')->assertOk();
-    $aggregateQueries = collect(DB::getQueryLog())
-        ->filter(fn (array $query): bool => str_contains($query['query'], 'from "transactions"'));
+    $aggregateQueries = transactionQueries();
 
     expect($aggregateQueries)->toHaveCount(1)
-        ->and(Cache::get(LaravelDashboardSummaryCache::key($user->id)))->toBe(['income' => 500, 'expense' => 0]);
+        ->and(Cache::get(LaravelDashboardSummaryCache::summaryKey($user->id, 0)))->toBe(['income' => 500, 'expense' => 0]);
 
     DB::flushQueryLog();
     $this->getJson('/api/dashboard')->assertOk()->assertJsonPath('data.income', 500);
 
-    expect(collect(DB::getQueryLog())->filter(
-        fn (array $query): bool => str_contains($query['query'], 'from "transactions"'),
-    ))->toBeEmpty();
+    expect(transactionQueries())->toBeEmpty();
 });
 
 it('serves the cached value until new transactions are imported', function (): void {
@@ -99,13 +99,58 @@ it('serves the cached value until new transactions are imported', function (): v
     $this->getJson('/api/dashboard')->assertJsonPath('data.income', 15_000);
 });
 
-it('invalidates only the cache entry of the affected user', function (): void {
-    $cache = app(LaravelDashboardSummaryCache::class);
-    Cache::put($cache::key(1), ['income' => 1, 'expense' => 0]);
-    Cache::put($cache::key(2), ['income' => 2, 'expense' => 0]);
+it('invalidates only the cache of the affected user', function (): void {
+    $cache = app(DashboardSummaryCache::class);
+    $cache->remember(1, fn (): DashboardSummary => new DashboardSummary(1, 0));
+    $cache->remember(2, fn (): DashboardSummary => new DashboardSummary(2, 0));
 
     event(new TransactionsImported(userId: 1, importId: 10, count: 5));
 
-    expect(Cache::has($cache::key(1)))->toBeFalse()
-        ->and(Cache::has($cache::key(2)))->toBeTrue();
+    expect($cache->remember(1, fn (): DashboardSummary => new DashboardSummary(100, 0))->income)->toBe(100)
+        ->and($cache->remember(2, fn (): DashboardSummary => new DashboardSummary(200, 0))->income)->toBe(2);
 });
+
+it('never serves a summary computed before an invalidation (read/invalidate race)', function (): void {
+    $cache = app(DashboardSummaryCache::class);
+
+    // A request reads the old totals; while it computes, an import commits
+    // new transactions and invalidates the cache; then it writes its result.
+    $stale = $cache->remember(1, function () use ($cache): DashboardSummary {
+        $staleSummary = new DashboardSummary(income: 100, expense: 0);
+        $cache->forget(1);
+
+        return $staleSummary;
+    });
+
+    $next = $cache->remember(1, fn (): DashboardSummary => new DashboardSummary(income: 900, expense: 0));
+
+    expect($stale->income)->toBe(100)
+        ->and($next->income)->toBe(900);
+});
+
+it('computes a missing summary only once for concurrent readers of the same version', function (): void {
+    $cache = app(DashboardSummaryCache::class);
+    $computations = 0;
+    $compute = function () use (&$computations): DashboardSummary {
+        $computations++;
+
+        return new DashboardSummary(income: 5, expense: 1);
+    };
+
+    $cache->remember(7, $compute);
+    $cache->remember(7, $compute);
+
+    expect($computations)->toBe(1);
+});
+
+/**
+ * Queries that touched the transactions table, whatever the SQL quoting style
+ * of the connection (`transactions`, "transactions" or bare).
+ *
+ * @return Collection<int, array{query: string}>
+ */
+function transactionQueries(): Collection
+{
+    return collect(DB::getQueryLog())
+        ->filter(fn (array $query): bool => preg_match('/\bfrom\s+[`"]?transactions[`"]?/i', $query['query']) === 1);
+}
