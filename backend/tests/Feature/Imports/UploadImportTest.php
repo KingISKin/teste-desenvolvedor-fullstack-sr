@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Domain\Imports\Contracts\ImportProcessingQueue;
 use App\Domain\Imports\Enums\ImportStatus;
 use App\Jobs\ProcessTransactionImport;
 use App\Models\TransactionImport;
@@ -82,4 +83,29 @@ it('requires authentication to upload', function (): void {
         ->assertUnauthorized();
 
     Queue::assertNothingPushed();
+});
+
+it('marks the import as failed and removes the file when it cannot be queued', function (): void {
+    actingAsUser();
+    app()->instance(ImportProcessingQueue::class, new class implements ImportProcessingQueue
+    {
+        public function push(int $importId): void
+        {
+            throw new RuntimeException('Redis is down.');
+        }
+    });
+
+    $this->withoutExceptionHandling();
+
+    expect(fn () => $this->postJson('/api/imports', [
+        'file' => UploadedFile::fake()->createWithContent('a.csv', csv(['2026-05-01,X,1,Receita'])),
+    ]))->toThrow(RuntimeException::class, 'Redis is down.');
+
+    $import = TransactionImport::query()->sole();
+
+    expect($import->status)->toBe(ImportStatus::Failed)
+        ->and($import->errors)->toBe([['line' => 0, 'message' => 'The import could not be queued. Please try again.']])
+        ->and($import->finished_at)->not->toBeNull();
+
+    Storage::disk('local')->assertMissing($import->stored_path);
 });

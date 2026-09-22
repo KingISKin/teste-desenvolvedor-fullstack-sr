@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Domain\Auth\Actions;
 
+use App\Domain\Auth\Contracts\UserRepository;
 use App\Domain\Auth\DTOs\IssuedToken;
 use App\Domain\Auth\DTOs\LoginCredentials;
 use App\Domain\Auth\Exceptions\InvalidCredentials;
-use App\Models\User;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Hashing\Hasher;
 use Illuminate\Support\Carbon;
@@ -20,6 +20,7 @@ final readonly class IssueAccessToken
     private const TOKEN_NAME = 'api';
 
     public function __construct(
+        private UserRepository $users,
         private Hasher $hasher,
         private Config $config,
     ) {}
@@ -29,7 +30,7 @@ final readonly class IssueAccessToken
      */
     public function handle(LoginCredentials $credentials): IssuedToken
     {
-        $user = User::query()->where('email', $credentials->email)->first();
+        $user = $this->users->findByEmail($credentials->email);
 
         if ($user === null || ! $this->hasher->check($credentials->password, $user->password)) {
             throw new InvalidCredentials;

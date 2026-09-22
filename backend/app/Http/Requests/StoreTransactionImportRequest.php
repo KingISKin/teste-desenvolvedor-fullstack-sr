@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Domain\Imports\DTOs\UploadedCsv;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\UploadedFile;
 
@@ -20,11 +21,11 @@ final class StoreTransactionImportRequest extends FormRequest
         ];
     }
 
-    public function csvFile(): UploadedFile
+    public function toUploadedCsv(): UploadedCsv
     {
         /** @var UploadedFile $file */
         $file = $this->file('file');
 
-        return $file;
+        return new UploadedCsv((string) $file->getRealPath(), $file->getClientOriginalName());
     }
 }

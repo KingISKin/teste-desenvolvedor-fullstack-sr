@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Domain\Transactions\Contracts;
 
-use App\Domain\Dashboard\DTOs\DashboardSummary;
 use App\Domain\Transactions\DTOs\TransactionData;
+use App\Domain\Transactions\DTOs\TransactionTotals;
 use App\Models\Transaction;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
@@ -28,5 +28,5 @@ interface TransactionRepository
     /**
      * Income and expense totals for the user computed by one aggregate query.
      */
-    public function summarizeForUser(int $userId): DashboardSummary;
+    public function totalsForUser(int $userId): TransactionTotals;
 }

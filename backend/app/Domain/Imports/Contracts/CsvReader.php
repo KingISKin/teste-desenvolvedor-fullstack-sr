@@ -7,8 +7,8 @@ namespace App\Domain\Imports\Contracts;
 interface CsvReader
 {
     /**
-     * Lazily yields CSV records keyed by their 1-based line number, without
-     * loading the whole stream into memory. Blank lines are skipped.
+     * Lazily yields CSV records keyed by their 1-based physical line number,
+     * without loading the whole stream into memory. Blank lines are skipped.
      *
      * @param  resource  $stream
      * @return iterable<int, list<string|null>>

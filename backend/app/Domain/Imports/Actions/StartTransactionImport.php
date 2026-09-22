@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace App\Domain\Imports\Actions;
 
+use App\Domain\Imports\Contracts\ImportFileStorage;
+use App\Domain\Imports\Contracts\ImportProcessingQueue;
 use App\Domain\Imports\Contracts\TransactionImportRepository;
-use App\Jobs\ProcessTransactionImport;
+use App\Domain\Imports\DTOs\RowError;
+use App\Domain\Imports\DTOs\UploadedCsv;
 use App\Models\TransactionImport;
 use App\Models\User;
-use Illuminate\Contracts\Bus\Dispatcher;
-use Illuminate\Contracts\Config\Repository as Config;
-use Illuminate\Http\UploadedFile;
-use RuntimeException;
+use Throwable;
 
 /**
  * Accepts an uploaded CSV: stores it privately, records a pending import and
@@ -21,30 +21,32 @@ final readonly class StartTransactionImport
 {
     public function __construct(
         private TransactionImportRepository $imports,
-        private Dispatcher $bus,
-        private Config $config,
+        private ImportFileStorage $files,
+        private ImportProcessingQueue $queue,
     ) {}
 
-    public function handle(User $user, UploadedFile $file): TransactionImport
+    /**
+     * @throws Throwable When the import cannot be queued (it is marked as failed first).
+     */
+    public function handle(User $user, UploadedCsv $upload): TransactionImport
     {
-        $directory = $this->config->get('imports.directory').'/'.$user->id;
-
-        // Random server-side name: the client filename is never used as a path.
-        $storedPath = $file->storeAs($directory, $file->hashName(), [
-            'disk' => $this->config->get('imports.disk'),
-        ]);
-
-        if ($storedPath === false) {
-            throw new RuntimeException('The uploaded file could not be stored.');
-        }
+        $storedPath = $this->files->store($user->id, $upload->temporaryPath);
 
         $import = $this->imports->create(
             $user->id,
-            mb_substr($file->getClientOriginalName(), 0, 255),
+            mb_substr($upload->originalName, 0, 255),
             $storedPath,
         );
 
-        $this->bus->dispatch(new ProcessTransactionImport($import->id));
+        try {
+            $this->queue->push($import->id);
+        } catch (Throwable $exception) {
+            // Never leave a "pending" import that no worker will ever pick up.
+            $this->files->delete($storedPath);
+            $this->imports->markFailed($import, new RowError(0, 'The import could not be queued. Please try again.'));
+
+            throw $exception;
+        }
 
         return $import;
     }

@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Domain\Imports\Actions\FailTransactionImport;
 use App\Domain\Imports\Actions\ImportTransactionsFromCsv;
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
@@ -21,8 +22,8 @@ final class ProcessTransactionImport implements ShouldQueue
 
     public int $tries = 3;
 
-    /** @var list<int> Seconds to wait before each retry. */
-    public array $backoff = [10, 30, 60];
+    /** @var list<int> Seconds to wait before retry #1 and #2 (one entry per retry). */
+    public array $backoff = [10, 30];
 
     public int $timeout = 600;
 
@@ -52,8 +53,17 @@ final class ProcessTransactionImport implements ShouldQueue
         $importTransactions->handle($this->importId);
     }
 
+    /**
+     * Laravel invokes failed() directly (no container injection), so the
+     * dependency is injected through the container-invoked method below.
+     */
     public function failed(?Throwable $exception): void
     {
-        app(FailTransactionImport::class)->handle($this->importId);
+        Container::getInstance()->call([$this, 'handleFailure']);
+    }
+
+    public function handleFailure(FailTransactionImport $failImport): void
+    {
+        $failImport->handle($this->importId);
     }
 }

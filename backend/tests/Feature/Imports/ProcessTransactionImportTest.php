@@ -115,7 +115,7 @@ it('fails when the stored file is missing', function (): void {
     ProcessTransactionImport::dispatchSync($import->id);
 
     expect($import->refresh()->status)->toBe(ImportStatus::Failed)
-        ->and($import->errors)->toBe([['line' => 0, 'message' => 'The uploaded file is no longer available.']]);
+        ->and($import->errors)->toBe([['line' => 0, 'message' => 'The uploaded file could not be found on the server. Please upload it again.']]);
 });
 
 it('inserts in chunks and dispatches one event per committed chunk', function (): void {
@@ -179,9 +179,9 @@ it('resumes from the checkpoint on retry without duplicating rows', function ():
             return $this->inner->paginateForUser($userId, $perPage);
         }
 
-        public function summarizeForUser(int $userId): App\Domain\Dashboard\DTOs\DashboardSummary
+        public function totalsForUser(int $userId): App\Domain\Transactions\DTOs\TransactionTotals
         {
-            return $this->inner->summarizeForUser($userId);
+            return $this->inner->totalsForUser($userId);
         }
     });
 
@@ -269,7 +269,8 @@ it('declares a bounded retry policy', function (): void {
     $job = new ProcessTransactionImport(1);
 
     expect($job->tries)->toBe(3)
-        ->and($job->backoff)->toBe([10, 30, 60])
+        ->and($job->backoff)->toBe([10, 30])
+        ->and($job->backoff)->toHaveCount($job->tries - 1)
         ->and($job->timeout)->toBe(600)
         ->and($job->failOnTimeout)->toBeTrue()
         ->and($job->middleware()[0])->toBeInstanceOf(WithoutOverlapping::class)

@@ -20,7 +20,11 @@ final readonly class GetDashboardSummary
     {
         return $this->cache->remember(
             $user->id,
-            fn (): DashboardSummary => $this->transactions->summarizeForUser($user->id),
+            function () use ($user): DashboardSummary {
+                $totals = $this->transactions->totalsForUser($user->id);
+
+                return new DashboardSummary($totals->income, $totals->expense);
+            },
         );
     }
 }

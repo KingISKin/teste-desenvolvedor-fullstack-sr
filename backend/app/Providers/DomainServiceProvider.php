@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Domain\Auth\Contracts\UserRepository;
 use App\Domain\Dashboard\Contracts\DashboardSummaryCache;
 use App\Domain\Dashboard\Listeners\InvalidateDashboardCache;
 use App\Domain\Imports\Contracts\CsvReader;
+use App\Domain\Imports\Contracts\ImportFileStorage;
+use App\Domain\Imports\Contracts\ImportProcessingQueue;
 use App\Domain\Imports\Contracts\TransactionImportRepository;
 use App\Domain\Transactions\Contracts\TransactionRepository;
 use App\Domain\Transactions\Events\TransactionsImported;
@@ -14,6 +17,9 @@ use App\Infrastructure\Cache\LaravelDashboardSummaryCache;
 use App\Infrastructure\Csv\StreamingCsvReader;
 use App\Infrastructure\Persistence\EloquentTransactionImportRepository;
 use App\Infrastructure\Persistence\EloquentTransactionRepository;
+use App\Infrastructure\Persistence\EloquentUserRepository;
+use App\Infrastructure\Queue\LaravelImportProcessingQueue;
+use App\Infrastructure\Storage\LaravelImportFileStorage;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
@@ -30,6 +36,9 @@ final class DomainServiceProvider extends ServiceProvider
         TransactionImportRepository::class => EloquentTransactionImportRepository::class,
         DashboardSummaryCache::class => LaravelDashboardSummaryCache::class,
         CsvReader::class => StreamingCsvReader::class,
+        ImportFileStorage::class => LaravelImportFileStorage::class,
+        ImportProcessingQueue::class => LaravelImportProcessingQueue::class,
+        UserRepository::class => EloquentUserRepository::class,
     ];
 
     public function boot(): void

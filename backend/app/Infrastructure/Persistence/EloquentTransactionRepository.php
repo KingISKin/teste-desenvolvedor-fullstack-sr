@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Persistence;
 
-use App\Domain\Dashboard\DTOs\DashboardSummary;
 use App\Domain\Transactions\Contracts\TransactionRepository;
 use App\Domain\Transactions\DTOs\TransactionData;
+use App\Domain\Transactions\DTOs\TransactionTotals;
 use App\Domain\Transactions\Enums\TransactionType;
 use App\Models\Transaction;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -49,7 +49,7 @@ final class EloquentTransactionRepository implements TransactionRepository
             ->paginate($perPage, self::LIST_COLUMNS);
     }
 
-    public function summarizeForUser(int $userId): DashboardSummary
+    public function totalsForUser(int $userId): TransactionTotals
     {
         // Single aggregate query; each type is summed explicitly, so an
         // expense can never leak into the income total (and vice versa).
@@ -63,6 +63,6 @@ final class EloquentTransactionRepository implements TransactionRepository
             )
             ->first();
 
-        return new DashboardSummary((int) ($totals->income ?? 0), (int) ($totals->expense ?? 0));
+        return new TransactionTotals((int) ($totals->income ?? 0), (int) ($totals->expense ?? 0));
     }
 }

@@ -23,7 +23,7 @@ final class TransactionImportController
         #[CurrentUser] User $user,
         StartTransactionImport $startImport,
     ): JsonResponse {
-        $import = $startImport->handle($user, $request->csvFile());
+        $import = $startImport->handle($user, $request->toUploadedCsv());
 
         return (new TransactionImportResource($import))
             ->response()

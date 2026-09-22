@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Imports\Actions;
 
 use App\Domain\Imports\Contracts\CsvReader;
+use App\Domain\Imports\Contracts\ImportFileStorage;
 use App\Domain\Imports\Contracts\TransactionImportRepository;
 use App\Domain\Imports\Csv\TransactionCsvRowParser;
 use App\Domain\Imports\DTOs\RowError;
@@ -16,10 +17,7 @@ use App\Domain\Transactions\Events\TransactionsImported;
 use App\Models\TransactionImport;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Events\Dispatcher as Events;
-use Illuminate\Contracts\Filesystem\Factory as Filesystem;
-use Illuminate\Contracts\Filesystem\Filesystem as Disk;
 use Illuminate\Database\ConnectionInterface;
-use RuntimeException;
 
 /**
  * Streams a stored CSV, validates every row and bulk inserts the valid ones.
@@ -28,25 +26,17 @@ use RuntimeException;
  * line and counters) are committed in the same database transaction. A retry
  * resumes after the checkpoint, so rows are never inserted twice.
  */
-final class ImportTransactionsFromCsv
+final readonly class ImportTransactionsFromCsv
 {
-    /** @var list<TransactionData> */
-    private array $pendingTransactions = [];
-
-    /** @var list<RowError> */
-    private array $pendingErrors = [];
-
-    private int $pendingLines = 0;
-
     public function __construct(
-        private readonly TransactionImportRepository $imports,
-        private readonly TransactionRepository $transactions,
-        private readonly TransactionCsvRowParser $parser,
-        private readonly CsvReader $reader,
-        private readonly ConnectionInterface $database,
-        private readonly Events $events,
-        private readonly Filesystem $filesystem,
-        private readonly Config $config,
+        private TransactionImportRepository $imports,
+        private TransactionRepository $transactions,
+        private TransactionCsvRowParser $parser,
+        private CsvReader $reader,
+        private ImportFileStorage $files,
+        private ConnectionInterface $database,
+        private Events $events,
+        private Config $config,
     ) {}
 
     public function handle(int $importId): void
@@ -58,16 +48,17 @@ final class ImportTransactionsFromCsv
             return;
         }
 
-        $disk = $this->disk();
-
-        if (! $disk->exists($import->stored_path)) {
-            $this->imports->markFailed($import, new RowError(0, 'The uploaded file is no longer available.'));
+        if (! $this->files->exists($import->stored_path)) {
+            $this->imports->markFailed(
+                $import,
+                new RowError(0, 'The uploaded file could not be found on the server. Please upload it again.'),
+            );
 
             return;
         }
 
         try {
-            $totalRows = $this->countDataRows($disk, $import->stored_path);
+            $totalRows = $this->countDataRows($import->stored_path);
         } catch (InvalidCsvHeader $exception) {
             $this->imports->markFailed($import, new RowError(1, $exception->getMessage()));
 
@@ -75,51 +66,56 @@ final class ImportTransactionsFromCsv
         }
 
         $this->imports->markProcessing($import, $totalRows);
-        $this->processRows($import, $disk);
+        $this->processRows($import);
         $this->imports->markCompleted($import);
 
         // The data now lives in the database; the raw upload is no longer needed.
         // Failed imports keep their file for troubleshooting.
-        $disk->delete($import->stored_path);
+        $this->files->delete($import->stored_path);
     }
 
-    private function processRows(TransactionImport $import, Disk $disk): void
+    private function processRows(TransactionImport $import): void
     {
         $chunkSize = max(1, (int) $this->config->get('imports.chunk_size'));
         $checkpoint = $import->last_processed_line;
+
+        /** @var list<TransactionData> $transactions */
+        $transactions = [];
+        /** @var list<RowError> $errors */
+        $errors = [];
+        $pendingLines = 0;
         $lastLine = $checkpoint;
 
-        $this->resetPending();
-
-        foreach ($this->dataRecords($disk, $import->stored_path) as $line => $fields) {
+        foreach ($this->dataRecords($import->stored_path) as $line => $fields) {
             if ($line <= $checkpoint) {
                 continue;
             }
 
             try {
-                $this->pendingTransactions[] = $this->parser->parse($fields);
+                $transactions[] = $this->parser->parse($fields);
             } catch (InvalidTransactionRow $exception) {
-                $this->pendingErrors[] = new RowError($line, $exception->getMessage());
+                $errors[] = new RowError($line, $exception->getMessage());
             }
 
             $lastLine = $line;
-            $this->pendingLines++;
 
-            if ($this->pendingLines >= $chunkSize) {
-                $this->flush($import, $lastLine);
+            if (++$pendingLines >= $chunkSize) {
+                $this->commitChunk($import, $transactions, $errors, $lastLine);
+                [$transactions, $errors, $pendingLines] = [[], [], 0];
             }
         }
 
-        if ($this->pendingLines > 0) {
-            $this->flush($import, $lastLine);
+        if ($pendingLines > 0) {
+            $this->commitChunk($import, $transactions, $errors, $lastLine);
         }
     }
 
-    private function flush(TransactionImport $import, int $lastLine): void
+    /**
+     * @param  list<TransactionData>  $transactions
+     * @param  list<RowError>  $errors
+     */
+    private function commitChunk(TransactionImport $import, array $transactions, array $errors, int $lastLine): void
     {
-        $transactions = $this->pendingTransactions;
-        $errors = $this->pendingErrors;
-
         $this->database->transaction(function () use ($import, $transactions, $errors, $lastLine): void {
             if ($transactions !== []) {
                 $this->transactions->insertMany($import->user_id, $import->id, $transactions);
@@ -131,15 +127,6 @@ final class ImportTransactionsFromCsv
         if ($transactions !== []) {
             $this->events->dispatch(new TransactionsImported($import->user_id, $import->id, count($transactions)));
         }
-
-        $this->resetPending();
-    }
-
-    private function resetPending(): void
-    {
-        $this->pendingTransactions = [];
-        $this->pendingErrors = [];
-        $this->pendingLines = 0;
     }
 
     /**
@@ -148,11 +135,11 @@ final class ImportTransactionsFromCsv
      *
      * @throws InvalidCsvHeader
      */
-    private function countDataRows(Disk $disk, string $path): int
+    private function countDataRows(string $path): int
     {
         $count = 0;
 
-        foreach ($this->dataRecords($disk, $path) as $ignored) {
+        foreach ($this->dataRecords($path) as $ignored) {
             $count++;
         }
 
@@ -164,13 +151,9 @@ final class ImportTransactionsFromCsv
      *
      * @throws InvalidCsvHeader
      */
-    private function dataRecords(Disk $disk, string $path): iterable
+    private function dataRecords(string $path): iterable
     {
-        $stream = $disk->readStream($path);
-
-        if (! is_resource($stream)) {
-            throw new RuntimeException("Unable to open import file [{$path}].");
-        }
+        $stream = $this->files->readStream($path);
 
         try {
             $headerSeen = false;
@@ -192,10 +175,5 @@ final class ImportTransactionsFromCsv
         } finally {
             fclose($stream);
         }
-    }
-
-    private function disk(): Disk
-    {
-        return $this->filesystem->disk((string) $this->config->get('imports.disk'));
     }
 }
