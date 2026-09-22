@@ -2,14 +2,11 @@
 
 declare(strict_types=1);
 
-use App\Domain\Dashboard\Actions\GetDashboardSummary;
 use App\Domain\Imports\Actions\ImportTransactionsFromCsv;
-use App\Domain\Imports\Csv\TransactionCsvRowParser;
 use App\Domain\Imports\Enums\ImportStatus;
 use App\Domain\Transactions\Contracts\TransactionRepository;
 use App\Domain\Transactions\Enums\TransactionType;
 use App\Domain\Transactions\Events\TransactionsImported;
-use App\Domain\Transactions\Events\TransactionsRolledBack;
 use App\Infrastructure\Persistence\EloquentTransactionRepository;
 use App\Jobs\ProcessTransactionImport;
 use App\Models\Transaction;
@@ -250,76 +247,6 @@ it('caps the number of stored row errors', function (): void {
 
     expect($import->failed_rows)->toBe(10)
         ->and($import->errors)->toHaveCount(3);
-});
-
-it('marks the import as failed once all attempts are exhausted', function (): void {
-    $import = TransactionImport::factory()->create();
-
-    (new ProcessTransactionImport($import->id))->failed(new RuntimeException('Internal detail'));
-
-    $import->refresh();
-
-    expect($import->status)->toBe(ImportStatus::Failed)
-        ->and($import->finished_at)->not->toBeNull()
-        ->and($import->errors)->toBe([
-            ['line' => 0, 'message' => 'The import could not be processed and no rows were saved. Please upload the file again.'],
-        ]);
-});
-
-it('rolls back rows committed by earlier attempts when the job finally fails', function (): void {
-    Event::fake([TransactionsRolledBack::class]);
-    $user = User::factory()->create();
-
-    $kept = storedImport(csv(['2026-01-03,Kept,300,Receita']), $user);
-    ProcessTransactionImport::dispatchSync($kept->id);
-
-    // An attempt committed its first chunk and then crashed.
-    $import = TransactionImport::factory()->for($user)->create([
-        'status' => ImportStatus::Processing,
-        'total_rows' => 2,
-        'processed_rows' => 1,
-        'last_processed_line' => 2,
-    ]);
-    app(TransactionRepository::class)->insertMany($user->id, $import->id, [
-        (new TransactionCsvRowParser)->parse(['2026-01-01', 'A', '100', 'Receita']),
-    ]);
-
-    (new ProcessTransactionImport($import->id))->failed(new RuntimeException('Gave up'));
-
-    $import->refresh();
-
-    expect($import->status)->toBe(ImportStatus::Failed)
-        ->and($import->processed_rows)->toBe(0)
-        ->and($import->last_processed_line)->toBe(0)
-        ->and(Transaction::query()->pluck('description')->all())->toBe(['Kept']);
-
-    Event::assertDispatched(
-        TransactionsRolledBack::class,
-        fn (TransactionsRolledBack $event): bool => $event->userId === $user->id
-            && $event->importId === $import->id
-            && $event->count === 1,
-    );
-});
-
-it('invalidates the dashboard cache when an import is rolled back', function (): void {
-    $user = User::factory()->create();
-    $import = TransactionImport::factory()->for($user)->create(['status' => ImportStatus::Processing]);
-    Transaction::factory()->for($user)->income(700)->create(['transaction_import_id' => $import->id]);
-
-    $summary = fn () => app(GetDashboardSummary::class)->handle($user);
-    expect($summary()->income)->toBe(700);
-
-    (new ProcessTransactionImport($import->id))->failed(new RuntimeException);
-
-    expect($summary()->income)->toBe(0);
-});
-
-it('does not overwrite a finished import when a late failure arrives', function (): void {
-    $import = TransactionImport::factory()->create(['status' => ImportStatus::Completed]);
-
-    (new ProcessTransactionImport($import->id))->failed(new RuntimeException);
-
-    expect($import->refresh()->status)->toBe(ImportStatus::Completed);
 });
 
 it('declares a bounded retry policy', function (): void {

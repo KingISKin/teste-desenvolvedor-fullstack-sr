@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -10,6 +11,12 @@ use Tests\TestCase;
 pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
     ->in('Feature');
+
+// For code that manages (and may roll back) every open transaction itself,
+// which cannot run inside RefreshDatabase's wrapping transaction.
+pest()->extend(TestCase::class)
+    ->use(DatabaseMigrations::class)
+    ->in('NonTransactional');
 
 /**
  * Authenticates a (new) user for the following requests via Sanctum.

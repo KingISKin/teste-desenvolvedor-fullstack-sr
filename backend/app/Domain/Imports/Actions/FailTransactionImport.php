@@ -28,6 +28,13 @@ final readonly class FailTransactionImport
 
     public function handle(int $importId): void
     {
+        // A job timeout can invoke this while a chunk transaction is still open
+        // on the worker's connection. Discard it first, otherwise the rollback
+        // below would be nested in (and lost with) the half-written chunk.
+        while ($this->database->transactionLevel() > 0) {
+            $this->database->rollBack();
+        }
+
         $import = $this->imports->find($importId);
 
         if ($import === null || $import->status->isTerminal()) {
