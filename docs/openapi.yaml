@@ -1,0 +1,625 @@
+openapi: 3.0.3
+info:
+  title: Financial Import API
+  version: 1.0.0
+  description: |
+    Stateless REST API for importing financial transactions from CSV files and
+    reading a cached dashboard summary.
+
+    **Authentication.** Every endpoint except `POST /api/auth/login` requires a
+    Sanctum personal access token sent as `Authorization: Bearer <token>`.
+    Tokens expire after `SANCTUM_TOKEN_EXPIRATION` minutes (default 480).
+    There is no registration: a demo user is seeded from `DEMO_USER_EMAIL` /
+    `DEMO_USER_PASSWORD`.
+
+    **Money.** All monetary values are **integers in cents** (e.g. `115346` is
+    R$ 1.153,46). Amounts are always positive; the sign is given by `type`.
+
+    **Asynchronous imports.** `POST /api/imports` only stores the file and queues
+    it (HTTP 202). Poll `GET /api/imports/{import}` until `status` is
+    `completed` or `failed`.
+
+    **Errors.** Every error body is JSON with at least a `message` field.
+    Validation errors (422) add an `errors` object keyed by field.
+
+    **Rate limits.** Login: 5 attempts per minute per e-mail + IP. All API
+    routes: 120 requests per minute per user (or IP when anonymous).
+servers:
+  - url: http://localhost:8080
+    description: Docker compose stack (nginx proxies /api to php-fpm)
+
+tags:
+  - name: Auth
+  - name: Dashboard
+  - name: Transactions
+  - name: Imports
+  - name: Health
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in and obtain a bearer token
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              email: demo@example.com
+              password: password
+      responses:
+        '200':
+          description: Credentials accepted; a new expiring token was issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccessToken'
+        '422':
+          description: |
+            Invalid payload, or wrong e-mail/password. Wrong credentials always
+            produce the same generic message on the `email` field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              example:
+                message: These credentials do not match our records.
+                errors:
+                  email: [These credentials do not match our records.]
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the token used for this request
+      operationId: logout
+      responses:
+        '204':
+          description: Token revoked. Other tokens of the user stay valid.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the authenticated user
+      operationId: me
+      responses:
+        '200':
+          description: The authenticated user.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Get income, expense and balance totals
+      description: |
+        Totals of the authenticated user's transactions, computed by a single
+        aggregate query and cached per user. The cache is invalidated
+        automatically whenever an import persists new transactions.
+      operationId: getDashboard
+      responses:
+        '200':
+          description: Dashboard summary in cents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DashboardSummary'
+              example:
+                data:
+                  income: 3611960974
+                  expense: 2670954574
+                  balance: 941006400
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/transactions:
+    get:
+      tags: [Transactions]
+      summary: List transactions (paginated, newest first)
+      description: Ordered by transaction date descending, then id descending.
+      operationId: listTransactions
+      parameters:
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 15
+      responses:
+        '200':
+          description: A page of transactions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionPage'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/imports:
+    post:
+      tags: [Imports]
+      summary: Upload a CSV file for background import
+      description: |
+        The file is validated (CSV/plain text by content, at most 20 MB), stored
+        privately and queued. Processing (header check, row validation and
+        chunked persistence) happens in a queue worker.
+
+        Expected CSV layout (header required, exactly these columns):
+
+        ```
+        date,description,amount,type
+        2026-05-01,Mensalidade Cliente B #869,115346,Receita
+        2025-11-15,Impostos e Taxas #464,433209,Despesa
+        ```
+
+        * `date`: calendar date `YYYY-MM-DD`
+        * `description`: required, at most 255 characters
+        * `amount`: positive integer in cents
+        * `type`: `Receita` (income) or `Despesa` (expense), case-insensitive
+
+        Invalid rows are skipped and reported in the import `errors`; an invalid
+        header fails the whole import.
+      operationId: createImport
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: CSV file (csv or txt), max 20480 KB.
+      responses:
+        '202':
+          description: File accepted and queued for processing.
+          headers:
+            Location:
+              description: URL of the import resource to poll.
+              schema:
+                type: string
+                format: uri
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Import'
+              example:
+                data:
+                  id: 1
+                  status: pending
+                  total_rows: null
+                  processed_rows: 0
+                  failed_rows: 0
+                  errors: []
+                  created_at: '2026-09-22T12:00:00+00:00'
+                  finished_at: null
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '413':
+          description: Request body larger than the web server limit (21 MB).
+        '422':
+          description: Missing file, wrong file type or file too large.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              example:
+                message: 'The file field must be a file of type: csv, txt.'
+                errors:
+                  file: ['The file field must be a file of type: csv, txt.']
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /api/imports/{import}:
+    get:
+      tags: [Imports]
+      summary: Get the status and progress of an import
+      description: |
+        Used for polling. Imports that belong to other users answer 404 with
+        the same body as unknown ids, so their existence is never revealed.
+      operationId: getImport
+      parameters:
+        - name: import
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Import status.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Import'
+              examples:
+                processing:
+                  value:
+                    data:
+                      id: 1
+                      status: processing
+                      total_rows: 15000
+                      processed_rows: 7000
+                      failed_rows: 0
+                      errors: []
+                      created_at: '2026-09-22T12:00:00+00:00'
+                      finished_at: null
+                completedWithErrors:
+                  value:
+                    data:
+                      id: 2
+                      status: completed
+                      total_rows: 3
+                      processed_rows: 2
+                      failed_rows: 1
+                      errors:
+                        - line: 4
+                          message: Amount must be a positive integer number of cents.
+                      created_at: '2026-09-22T12:00:00+00:00'
+                      finished_at: '2026-09-22T12:00:02+00:00'
+                failedHeader:
+                  value:
+                    data:
+                      id: 3
+                      status: failed
+                      total_rows: null
+                      processed_rows: 0
+                      failed_rows: 0
+                      errors:
+                        - line: 1
+                          message: 'Invalid header. Expected exactly: date,description,amount,type.'
+                      created_at: '2026-09-22T12:00:00+00:00'
+                      finished_at: '2026-09-22T12:00:01+00:00'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /up:
+    get:
+      tags: [Health]
+      summary: Application health check
+      description: Boots the application and answers 200 with a small HTML page.
+      operationId: health
+      security: []
+      responses:
+        '200':
+          description: Application is up.
+          content:
+            text/html:
+              schema:
+                type: string
+        '500':
+          description: Application failed to boot.
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Sanctum personal access token returned by `POST /api/auth/login`.
+
+  responses:
+    Unauthenticated:
+      description: Missing, invalid, revoked or expired token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Unauthenticated.
+    NotFound:
+      description: Resource does not exist or belongs to another user.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Not found.
+    ValidationFailed:
+      description: Invalid input.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+          example:
+            message: The per page field must not be greater than 100.
+            errors:
+              per_page: [The per page field must not be greater than 100.]
+    TooManyRequests:
+      description: Rate limit exceeded.
+      headers:
+        Retry-After:
+          description: Seconds until a new attempt is allowed.
+          schema:
+            type: integer
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Too Many Attempts.
+
+  schemas:
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    ValidationError:
+      type: object
+      required: [message, errors]
+      properties:
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          format: password
+          maxLength: 255
+
+    AccessToken:
+      type: object
+      required: [token, token_type, expires_at, user]
+      properties:
+        token:
+          type: string
+          description: 'Plain-text token; send it as `Authorization: Bearer <token>`.'
+          example: 1|pQ4dC0p9m1wqkJ3yU2...
+        token_type:
+          type: string
+          enum: [Bearer]
+        expires_at:
+          type: string
+          format: date-time
+          example: '2026-09-22T20:00:00+00:00'
+        user:
+          $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      required: [id, name, email]
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Demo User
+        email:
+          type: string
+          format: email
+          example: demo@example.com
+
+    DashboardSummary:
+      type: object
+      required: [income, expense, balance]
+      properties:
+        income:
+          type: integer
+          format: int64
+          description: Sum of income transactions, in cents.
+        expense:
+          type: integer
+          format: int64
+          description: Sum of expense transactions, in cents (positive number).
+        balance:
+          type: integer
+          format: int64
+          description: income - expense, in cents (may be negative).
+
+    TransactionType:
+      type: string
+      enum: [income, expense]
+      description: '`income` comes from CSV "Receita", `expense` from "Despesa".'
+
+    Transaction:
+      type: object
+      required: [id, date, description, amount, type]
+      properties:
+        id:
+          type: integer
+          example: 42
+        date:
+          type: string
+          format: date
+          example: '2026-05-01'
+        description:
+          type: string
+          maxLength: 255
+          example: 'Mensalidade Cliente B #869'
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Positive amount in cents.
+          example: 115346
+        type:
+          $ref: '#/components/schemas/TransactionType'
+
+    TransactionPage:
+      type: object
+      required: [data, links, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Transaction'
+        links:
+          type: object
+          required: [first, last, prev, next]
+          properties:
+            first:
+              type: string
+              format: uri
+            last:
+              type: string
+              format: uri
+            prev:
+              type: string
+              format: uri
+              nullable: true
+            next:
+              type: string
+              format: uri
+              nullable: true
+        meta:
+          type: object
+          required: [current_page, from, last_page, links, path, per_page, to, total]
+          properties:
+            current_page:
+              type: integer
+            from:
+              type: integer
+              nullable: true
+            last_page:
+              type: integer
+            links:
+              type: array
+              items:
+                type: object
+                required: [url, label, page, active]
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                    nullable: true
+                  label:
+                    type: string
+                  page:
+                    type: integer
+                    nullable: true
+                  active:
+                    type: boolean
+            path:
+              type: string
+              format: uri
+            per_page:
+              type: integer
+            to:
+              type: integer
+              nullable: true
+            total:
+              type: integer
+
+    ImportStatus:
+      type: string
+      enum: [pending, processing, completed, failed]
+      description: '`completed` and `failed` are terminal: stop polling.'
+
+    ImportError:
+      type: object
+      required: [line, message]
+      properties:
+        line:
+          type: integer
+          minimum: 0
+          description: CSV line number (1 = header). 0 means a file-level problem.
+        message:
+          type: string
+
+    Import:
+      type: object
+      required: [id, status, total_rows, processed_rows, failed_rows, errors, created_at, finished_at]
+      properties:
+        id:
+          type: integer
+        status:
+          $ref: '#/components/schemas/ImportStatus'
+        total_rows:
+          type: integer
+          nullable: true
+          description: Data rows in the file; null until processing starts.
+        processed_rows:
+          type: integer
+          description: Rows validated and persisted so far.
+        failed_rows:
+          type: integer
+          description: Rows rejected by validation so far.
+        errors:
+          type: array
+          description: Row/file errors (at most 100 are stored).
+          items:
+            $ref: '#/components/schemas/ImportError'
+        created_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
