@@ -207,7 +207,8 @@ paths:
 
         Imports are all-or-nothing on infrastructure failures: if processing
         still fails after every retry, rows saved by earlier attempts are
-        removed and the import is marked `failed`.
+        removed, the counters are reset and the import is marked `failed` with
+        a single file-level error (line 0).
       operationId: createImport
       requestBody:
         required: true
@@ -604,10 +605,10 @@ components:
           description: Data rows in the file; null until processing starts.
         processed_rows:
           type: integer
-          description: Rows validated and persisted so far.
+          description: Rows validated and persisted so far (0 after a rollback).
         failed_rows:
           type: integer
-          description: Rows rejected by validation so far.
+          description: Rows rejected by validation so far (0 after a rollback).
         errors:
           type: array
           description: Row/file errors (at most 100 are stored).
