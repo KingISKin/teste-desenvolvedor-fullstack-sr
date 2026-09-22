@@ -6,7 +6,6 @@ namespace App\Models;
 
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Laravel\Sanctum\HasApiTokens;
 
@@ -36,22 +35,6 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
     ];
-
-    /**
-     * @return HasMany<Transaction, $this>
-     */
-    public function transactions(): HasMany
-    {
-        return $this->hasMany(Transaction::class);
-    }
-
-    /**
-     * @return HasMany<TransactionImport, $this>
-     */
-    public function transactionImports(): HasMany
-    {
-        return $this->hasMany(TransactionImport::class);
-    }
 
     /**
      * @return array<string, string>
