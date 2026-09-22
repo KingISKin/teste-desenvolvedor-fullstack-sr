@@ -134,4 +134,17 @@ describe('useImportPolling', () => {
     expect(onSettled).not.toHaveBeenCalled()
     expect(polling.current.value?.status).toBe('pending')
   })
+
+  it('reset() stops polling and forgets the tracked import', async () => {
+    const fetchImport = vi.fn().mockResolvedValue(makeImport('processing'))
+    const polling = useImportPolling({ fetchImport })
+
+    polling.start(makeImport('pending'))
+    polling.reset()
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(fetchImport).not.toHaveBeenCalled()
+    expect(polling.current.value).toBeNull()
+    expect(polling.isPolling.value).toBe(false)
+  })
 })

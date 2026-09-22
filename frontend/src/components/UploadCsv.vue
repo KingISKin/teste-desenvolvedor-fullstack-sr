@@ -6,7 +6,8 @@ import { useImportPolling } from '@/composables/useImportPolling'
 import type { Import } from '@/types/api'
 import { validateCsvFile } from '@/utils/csvFile'
 
-const emit = defineEmits<{ completed: [result: Import] }>()
+/** `finished` fires on `completed` and `failed`: either way the data may have changed. */
+const emit = defineEmits<{ finished: [result: Import] }>()
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const selectedFile = ref<File | null>(null)
@@ -20,14 +21,17 @@ const {
   isPolling,
   error: pollingError,
   start: startPolling,
-  stop: stopPolling,
+  reset: resetPolling,
 } = useImportPolling({
-  onSettled: (result) => {
-    if (result.status === 'completed') emit('completed', result)
-  },
+  onSettled: (result) => emit('finished', result),
 })
 
 const busy = computed(() => uploading.value || isPolling.value)
+
+/** Header is line 1, so data rows start at line 2; line 0 is a file-level problem. */
+const FIRST_DATA_LINE = 2
+const fileErrors = computed(() => currentImport.value?.errors.filter((e) => e.line < FIRST_DATA_LINE) ?? [])
+const rowErrors = computed(() => currentImport.value?.errors.filter((e) => e.line >= FIRST_DATA_LINE) ?? [])
 const numberFormat = new Intl.NumberFormat('pt-BR')
 const n = (value: number) => numberFormat.format(value)
 
@@ -66,7 +70,8 @@ async function submit(): Promise<void> {
   uploading.value = true
   uploadProgress.value = 0
   uploadError.value = null
-  stopPolling()
+  // A new attempt must never show the outcome of the previous import.
+  resetPolling()
 
   try {
     const created = await importsApi.upload(file, (percent) => {
@@ -132,10 +137,21 @@ async function submit(): Promise<void> {
       </p>
     </div>
 
-    <div v-if="!uploading && currentImport && currentImport.errors.length > 0" class="row-errors">
+    <template v-if="!uploading">
+      <p
+        v-for="fileError in fileErrors"
+        :key="`file-${fileError.line}-${fileError.message}`"
+        class="alert alert-error"
+        data-test="import-error"
+      >
+        {{ fileError.message }}
+      </p>
+    </template>
+
+    <div v-if="!uploading && rowErrors.length > 0" class="row-errors">
       <h3 class="row-errors-title">Rejected rows</h3>
       <ul data-test="row-errors">
-        <li v-for="rowError in currentImport.errors" :key="`${rowError.line}-${rowError.message}`">
+        <li v-for="rowError in rowErrors" :key="`${rowError.line}-${rowError.message}`">
           <span class="line">Line {{ rowError.line }}:</span> {{ rowError.message }}
         </li>
       </ul>

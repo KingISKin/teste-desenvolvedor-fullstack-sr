@@ -91,15 +91,14 @@ describe('UploadCsv', () => {
 
     await vi.advanceTimersByTimeAsync(2000)
     expect(statusText(wrapper)).toMatch(/Import completed: 15\.000 rows imported/)
-    expect(wrapper.emitted('completed')).toEqual([[completed]])
+    expect(wrapper.emitted('finished')).toEqual([[completed]])
     expect(wrapper.get('#csv-file').attributes('disabled')).toBeUndefined()
   })
 
-  it('shows the row errors when the import fails and does not emit completed', async () => {
+  it('shows a file-level error as an import error and still emits finished', async () => {
+    const failed = makeImport('failed', { errors: [{ line: 1, message: 'Invalid header.' }] })
     vi.mocked(importsApi.upload).mockResolvedValue(makeImport('pending'))
-    vi.mocked(importsApi.show).mockResolvedValue(
-      makeImport('failed', { errors: [{ line: 1, message: 'Invalid header.' }] }),
-    )
+    vi.mocked(importsApi.show).mockResolvedValue(failed)
 
     const wrapper = mount(UploadCsv)
     await selectFile(wrapper, csv())
@@ -108,8 +107,50 @@ describe('UploadCsv', () => {
     await vi.advanceTimersByTimeAsync(1000)
 
     expect(statusText(wrapper)).toContain('Import failed.')
-    expect(wrapper.get('[data-test="row-errors"]').text()).toContain('Line 1: Invalid header.')
-    expect(wrapper.emitted('completed')).toBeUndefined()
+    expect(wrapper.get('[data-test="import-error"]').text()).toBe('Invalid header.')
+    expect(wrapper.find('[data-test="row-errors"]').exists()).toBe(false)
+    // A failed import is rolled back server-side: the page must refresh too.
+    expect(wrapper.emitted('finished')).toEqual([[failed]])
+  })
+
+  it('lists rejected data rows separately from file-level errors', async () => {
+    vi.mocked(importsApi.upload).mockResolvedValue(makeImport('pending'))
+    vi.mocked(importsApi.show).mockResolvedValue(
+      makeImport('completed', {
+        processed_rows: 1,
+        failed_rows: 1,
+        errors: [{ line: 3, message: 'Amount must be a positive integer number of cents.' }],
+      }),
+    )
+
+    const wrapper = mount(UploadCsv)
+    await selectFile(wrapper, csv())
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(wrapper.get('[data-test="row-errors"]').text()).toContain('Line 3: Amount must be a positive')
+    expect(wrapper.find('[data-test="import-error"]').exists()).toBe(false)
+  })
+
+  it('clears the previous import outcome before a new upload', async () => {
+    vi.mocked(importsApi.upload).mockResolvedValueOnce(makeImport('pending'))
+    vi.mocked(importsApi.show).mockResolvedValue(makeImport('completed', { processed_rows: 3, total_rows: 3 }))
+
+    const wrapper = mount(UploadCsv)
+    await selectFile(wrapper, csv())
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(statusText(wrapper)).toMatch(/Import completed/)
+
+    vi.mocked(importsApi.upload).mockRejectedValueOnce(new Error('Network down'))
+    await selectFile(wrapper, csv())
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(statusText(wrapper)).not.toMatch(/Import completed/)
+    expect(wrapper.find('[data-test="upload-error"]').exists()).toBe(true)
   })
 
   it('shows the server validation message when the upload is rejected', async () => {

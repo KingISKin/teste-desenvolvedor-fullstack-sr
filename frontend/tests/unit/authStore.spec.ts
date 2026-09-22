@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
+import { useDashboardStore } from '@/stores/dashboard'
+import { useTransactionsStore } from '@/stores/transactions'
 import { authApi } from '@/api/auth'
 import { tokenStorage } from '@/utils/tokenStorage'
 
@@ -80,5 +82,22 @@ describe('auth store', () => {
     await auth.fetchUser()
 
     expect(auth.user).toEqual(user)
+  })
+
+  it('wipes dashboard and transactions data when the session ends', async () => {
+    vi.mocked(authApi.login).mockResolvedValue({ token: 'abc', user })
+    const auth = useAuthStore()
+    await auth.login({ email: user.email, password: 'secret' })
+    const dashboard = useDashboardStore()
+    const transactions = useTransactionsStore()
+    dashboard.summary = { income: 10, expense: 5, balance: 5 }
+    transactions.items = [{ id: 1, date: '2026-01-01', description: 'X', amount: 10, type: 'income' }]
+    transactions.meta = { current_page: 2, last_page: 3, per_page: 15, total: 40, from: 16, to: 30 }
+
+    auth.clearSession()
+
+    expect(dashboard.summary).toBeNull()
+    expect(transactions.items).toEqual([])
+    expect(transactions.meta).toBeNull()
   })
 })

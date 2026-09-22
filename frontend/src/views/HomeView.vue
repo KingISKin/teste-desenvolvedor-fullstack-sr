@@ -14,8 +14,11 @@ onMounted(() => {
   void dashboard.fetchSummary()
 })
 
-/** New rows were persisted: totals changed and the newest rows belong on page 1. */
-function onImportCompleted(): void {
+/**
+ * An import finished (completed, or failed and rolled back): totals may have
+ * changed and the newest rows belong on page 1.
+ */
+function onImportFinished(): void {
   void dashboard.fetchSummary()
   void transactions.fetchPage(1)
 }
@@ -25,7 +28,7 @@ function onImportCompleted(): void {
   <AppHeader />
   <main class="container home">
     <SummaryCards />
-    <UploadCsv @completed="onImportCompleted" />
+    <UploadCsv @finished="onImportFinished" />
     <TransactionsTable />
   </main>
 </template>

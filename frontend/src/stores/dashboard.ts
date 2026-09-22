@@ -21,5 +21,12 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
   }
 
-  return { summary, loading, error, fetchSummary }
+  /** Forgets the previous user's data (called when the session ends). */
+  function reset(): void {
+    summary.value = null
+    loading.value = false
+    error.value = null
+  }
+
+  return { summary, loading, error, fetchSummary, reset }
 })

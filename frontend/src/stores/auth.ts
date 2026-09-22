@@ -1,6 +1,8 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { authApi } from '@/api/auth'
+import { useDashboardStore } from '@/stores/dashboard'
+import { useTransactionsStore } from '@/stores/transactions'
 import type { LoginCredentials, User } from '@/types/api'
 import { tokenStorage } from '@/utils/tokenStorage'
 
@@ -23,11 +25,16 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = await authApi.me()
   }
 
-  /** Drops local credentials without calling the API (used after a 401). */
+  /**
+   * Drops local credentials without calling the API (used after a 401) and
+   * wipes user data held by other stores, so the next user never sees it.
+   */
   function clearSession(): void {
     tokenStorage.clear()
     token.value = null
     user.value = null
+    useDashboardStore().reset()
+    useTransactionsStore().reset()
   }
 
   async function logout(): Promise<void> {

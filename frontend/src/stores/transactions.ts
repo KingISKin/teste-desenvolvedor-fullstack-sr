@@ -38,6 +38,16 @@ export const useTransactionsStore = defineStore('transactions', () => {
     }
   }
 
+  /** Forgets the previous user's data (called when the session ends). */
+  function reset(): void {
+    latestRequest++ // any in-flight response is discarded
+    items.value = []
+    meta.value = null
+    perPage.value = DEFAULT_PER_PAGE
+    loading.value = false
+    error.value = null
+  }
+
   const refresh = () => fetchPage(currentPage.value)
   const nextPage = () => (hasNext.value ? fetchPage(currentPage.value + 1) : Promise.resolve())
   const previousPage = () => (hasPrevious.value ? fetchPage(currentPage.value - 1) : Promise.resolve())
@@ -56,5 +66,6 @@ export const useTransactionsStore = defineStore('transactions', () => {
     refresh,
     nextPage,
     previousPage,
+    reset,
   }
 })

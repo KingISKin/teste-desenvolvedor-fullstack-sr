@@ -110,6 +110,13 @@ export function useImportPolling(options: ImportPollingOptions = {}) {
     schedule(initial.id, generation)
   }
 
+  /** Stops polling and forgets the tracked import (before starting a new upload). */
+  function reset(): void {
+    stop()
+    current.value = null
+    error.value = null
+  }
+
   if (getCurrentScope()) {
     onScopeDispose(stop)
   }
@@ -120,5 +127,6 @@ export function useImportPolling(options: ImportPollingOptions = {}) {
     error: readonly(error),
     start,
     stop,
+    reset,
   }
 }

@@ -12,6 +12,9 @@ import { useDashboardStore } from '@/stores/dashboard'
 
 vi.mock('@/api/auth', () => ({ authApi: { login: vi.fn(), logout: vi.fn(), me: vi.fn() } }))
 vi.mock('@/api/dashboard', () => ({ dashboardApi: { summary: vi.fn() } }))
+// The login flow only needs to reach the home route; a stub keeps the lazy
+// route chunk (and its whole component tree) out of this test.
+vi.mock('@/views/HomeView.vue', () => ({ default: { name: 'HomeViewStub', render: () => null } }))
 
 const text = (value: string) => value.replace(/\u00a0/g, ' ')
 
@@ -76,7 +79,7 @@ describe('LoginView', () => {
 
     finish()
     // Navigation lazy-loads the home view chunk, so wait for it to settle.
-    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('home'))
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('home'), { timeout: 5000 })
   })
 
   it('shows the validation error returned by the API', async () => {
