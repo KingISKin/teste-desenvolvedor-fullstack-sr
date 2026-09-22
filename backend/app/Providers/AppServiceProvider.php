@@ -33,6 +33,11 @@ final class AppServiceProvider extends ServiceProvider
             Str::lower((string) $request->input('email')).'|'.$request->ip(),
         ));
 
+        // Uploads are expensive (disk + queue work): per user, on top of the API limit.
+        RateLimiter::for('imports', static fn (Request $request): Limit => Limit::perMinute(10)->by(
+            (string) ($request->user('sanctum')?->getAuthIdentifier() ?? $request->ip()),
+        ));
+
         // Runs before auth:sanctum, so the token is resolved explicitly (the guard
         // caches the user, the auth middleware does not query it again).
         RateLimiter::for('api', static fn (Request $request): Limit => Limit::perMinute(120)->by(

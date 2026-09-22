@@ -25,7 +25,9 @@ Route::middleware('auth:sanctum')->group(function (): void {
 
     Route::get('transactions', [TransactionController::class, 'index'])->name('transactions.index');
 
-    Route::post('imports', [TransactionImportController::class, 'store'])->name('imports.store');
+    Route::post('imports', [TransactionImportController::class, 'store'])
+        ->middleware('throttle:imports')
+        ->name('imports.store');
     Route::get('imports/{import}', [TransactionImportController::class, 'show'])
         ->whereNumber('import')
         ->middleware('can:view,import')

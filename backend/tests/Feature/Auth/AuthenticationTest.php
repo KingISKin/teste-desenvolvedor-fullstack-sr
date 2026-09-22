@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use Illuminate\Contracts\Hashing\Hasher;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -44,6 +45,45 @@ it('rejects invalid credentials with a generic 422 error', function (string $ema
     'wrong password' => ['jane@example.com', 'wrong-password'],
     'unknown e-mail' => ['nobody@example.com', 'correct-password'],
 ]);
+
+it('verifies a password hash even for unknown e-mails (no timing oracle)', function (): void {
+    $hasher = new class(app('hash')->driver()) implements Hasher
+    {
+        public int $checks = 0;
+
+        public function __construct(private readonly Hasher $inner) {}
+
+        public function info($hashedValue): array
+        {
+            return $this->inner->info($hashedValue);
+        }
+
+        public function make($value, array $options = []): string
+        {
+            return $this->inner->make($value, $options);
+        }
+
+        public function check($value, $hashedValue, array $options = []): bool
+        {
+            $this->checks++;
+
+            return $this->inner->check($value, $hashedValue, $options);
+        }
+
+        public function needsRehash($hashedValue, array $options = []): bool
+        {
+            return $this->inner->needsRehash($hashedValue, $options);
+        }
+    };
+    app()->instance(Hasher::class, $hasher);
+
+    $this->postJson('/api/auth/login', ['email' => 'nobody@example.com', 'password' => 'whatever'])
+        ->assertUnprocessable();
+    $this->postJson('/api/auth/login', ['email' => 'jane@example.com', 'password' => 'wrong'])
+        ->assertUnprocessable();
+
+    expect($hasher->checks)->toBe(2);
+});
 
 it('validates the login payload', function (): void {
     $this->postJson('/api/auth/login', ['email' => 'not-an-email'])
@@ -120,4 +160,12 @@ it('answers JSON 401 even when the client does not ask for JSON', function (): v
     $this->get('/api/dashboard')
         ->assertUnauthorized()
         ->assertHeader('Content-Type', 'application/json');
+});
+
+it('grants no cross-origin access by default', function (): void {
+    $this->withHeaders([
+        'Origin' => 'https://evil.example',
+        'Access-Control-Request-Method' => 'POST',
+    ])->options('/api/auth/login')
+        ->assertHeaderMissing('Access-Control-Allow-Origin');
 });
